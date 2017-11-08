@@ -3,6 +3,7 @@
 import sys
 import httplib2
 import os, errno
+import datetime
 
 from apiclient import discovery
 from oauth2client import client
@@ -53,7 +54,7 @@ def main():
         next_page_token = ""
         query = "trashed = false and '{0}' in parents".format(folder_id)
         while True:
-            result = service.files().list(fields="nextPageToken, files(id, name, mimeType, size, md5Checksum)", q=query, pageToken=next_page_token).execute()
+            result = service.files().list(fields="nextPageToken, files(id, name, mimeType, size, md5Checksum, modifiedTime, viewedByMeTime)", q=query, pageToken=next_page_token).execute()
             for item in result["files"]:
                 backup_file(item, destination)
             if "nextPageToken" in result:
@@ -67,10 +68,16 @@ def main():
         elif item["mimeType"] in MIME_MAPPINGS:
             export_mime_type, extension = MIME_MAPPINGS[item["mimeType"]]
             output_file = os.path.join(destination, "{0}.{1}".format(clean(item["name"]), extension))
-            print("Downloading", output_file)
-            data = service.files().export(fileId=item["id"], mimeType=export_mime_type).execute()
-            with open(output_file, "wb") as output:
-                output.write(data)
+            modified_time = parse_time(item["modifiedTime"])
+            if os.path.exists(output_file) and modified_time.timestamp() == os.stat(output_file).st_mtime:
+                print("Unchanged", output_file)
+            else:
+                print("Downloading", output_file)
+                data = service.files().export(fileId=item["id"], mimeType=export_mime_type).execute()
+                with open(output_file, "wb") as output:
+                    output.write(data)
+                viewed_time = parse_time(item["viewedByMeTime"]) if "viewedByMeTime" in item else modified_time
+                os.utime(output_file, times=(viewed_time.timestamp(), modified_time.timestamp()))
         elif "size" in item: # Binary file
             output_file = os.path.join(destination, clean(item["name"]))
             if "md5Checksum" in item and \
@@ -83,6 +90,9 @@ def main():
                 data = service.files().get_media(fileId=item["id"]).execute()
                 with open(output_file, "wb") as output:
                     output.write(data)
+                modified_time = parse_time(item["modifiedTime"])
+                viewed_time = parse_time(item["viewedByMeTime"]) if "viewedByMeTime" in item else modified_time
+                os.utime(output_file, times=(viewed_time.timestamp(), modified_time.timestamp()))
         else:
             print("WARNING: Cannot handle", item["mimeType"], item["id"], item["name"], file=sys.stderr)
 
@@ -109,6 +119,9 @@ def clean(filename):
     filename = filename.replace(": ", " ")
     filename = filename.replace(":", " ")
     return filename
+
+def parse_time(time):
+    return datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc).replace(microsecond=0)
 
 if __name__ == "__main__":
     main()
