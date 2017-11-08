@@ -62,7 +62,20 @@ def main():
             else:
                 break
 
+    def rename(item):
+        i = item["name"].rfind(".")
+        if i == -1:
+            return item["name"] + "-" + item["id"]
+        return item["name"][:i] + "-" + item["id"] + item["name"][i:]
+
+    backed_up_files = set()
     def backup_file(item, destination):
+        key = (destination, item["name"])
+        if key in backed_up_files:
+            print("WARNING:", item["name"], "already exists in", destination + ".", "Renaming to", rename(item) + ".", file=sys.stderr)
+            item["name"] = rename(item)
+            key = (destination, item["name"])
+        backed_up_files.add(key)
         if item["mimeType"] == "application/vnd.google-apps.folder":
             backup_folder(item["id"], os.path.join(destination, clean(item["name"])))
         elif item["mimeType"] in MIME_MAPPINGS:
