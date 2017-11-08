@@ -54,7 +54,7 @@ def main():
         next_page_token = ""
         query = "trashed = {0} and '{1}' in parents".format(flags.trashed, folder_id)
         while True:
-            result = service.files().list(fields="nextPageToken, files(id, name, mimeType, size, md5Checksum, modifiedTime, viewedByMeTime)", q=query, pageToken=next_page_token).execute()
+            result = service.files().list(fields="nextPageToken, files(id, name, mimeType, size, md5Checksum, modifiedTime, viewedByMeTime)", q=query, orderBy="name", pageToken=next_page_token).execute()
             for item in result["files"]:
                 backup_file(item, destination)
             if "nextPageToken" in result:
