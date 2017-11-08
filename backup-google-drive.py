@@ -12,18 +12,18 @@ from oauth2client.file import Storage
 
 import argparse
 parser = argparse.ArgumentParser(parents=[tools.argparser])
-parser.add_argument("destination")
+parser.add_argument("destination", help="The local folder to which the Google Drive backup will be made. Existing files will be overwritten.")
+parser.add_argument("--redownload-docs", help="Re-download Google Documents even if timestamps show no changes have been made.", action='store_true')
+parser.add_argument("--redownload-files", help="Re-download binary files even if MD5 checksums match local files.", action='store_true')
+parser.add_argument("--trashed", help="This will download items located in the Trash, instead of the regular drive.", action='store_true')
+parser.add_argument("--credential-file", help="Location of the credential file storing user credentials (default: user.json).", default="user.json")
 flags = parser.parse_args()
 
 SCOPES = "https://www.googleapis.com/auth/drive.readonly"
 CLIENT_SECRET_FILE = "client_secret.json"
 APPLICATION_NAME = "Google Drive Backup"
 
-def get_credentials():
-    home_dir = os.path.expanduser("~")
-    credential_dir = os.path.join(home_dir, ".credentials")
-    mkdirp(credential_dir)
-    credential_path = os.path.join(credential_dir, "google-drive-backup.json")
+def get_credentials(credential_path):
     store = Storage(credential_path)
     credentials = store.get()
     if not credentials or credentials.invalid:
@@ -45,14 +45,14 @@ MIME_MAPPINGS = {
 
 def main():
 
-    credentials = get_credentials()
+    credentials = get_credentials(flags.credential_file)
     http = credentials.authorize(httplib2.Http())
     service = discovery.build("drive", "v3", http=http)
 
     def backup_folder(folder_id, destination):
         mkdirp(destination)
         next_page_token = ""
-        query = "trashed = false and '{0}' in parents".format(folder_id)
+        query = "trashed = {0} and '{1}' in parents".format(flags.trashed, folder_id)
         while True:
             result = service.files().list(fields="nextPageToken, files(id, name, mimeType, size, md5Checksum, modifiedTime, viewedByMeTime)", q=query, pageToken=next_page_token).execute()
             for item in result["files"]:
@@ -92,7 +92,7 @@ def main():
             export_mime_type, extension = MIME_MAPPINGS[item["mimeType"]]
             output_file = os.path.join(destination, check_name(destination, "{0}.{1}".format(item["name"], extension), item["id"]))
             modified_time = parse_time(item["modifiedTime"])
-            if os.path.exists(output_file) and modified_time.timestamp() == os.stat(output_file).st_mtime:
+            if not flags.redownload_docs and os.path.exists(output_file) and modified_time.timestamp() == os.stat(output_file).st_mtime:
                 print("Unchanged", output_file)
             else:
                 print("Downloading", output_file)
@@ -103,7 +103,8 @@ def main():
                 os.utime(output_file, times=(viewed_time.timestamp(), modified_time.timestamp()))
         elif "size" in item: # Binary file
             output_file = os.path.join(destination, check_name(destination, item["name"], item["id"]))
-            if "md5Checksum" in item and \
+            if not flags.redownload_files and \
+                    "md5Checksum" in item and \
                     os.path.exists(output_file) and \
                     os.path.getsize(output_file) == int(item["size"]) and \
                     md5(output_file) == item["md5Checksum"]:

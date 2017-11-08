@@ -24,7 +24,23 @@ This script requires a client_secret.json file containing credentials that ident
 ## Usage
 
 ```
-./backup-google-drive.py <destination>
+backup-google-drive.py [-h] [--redownload-docs] [--redownload-files] [--trashed] [--credentials-file CREDENTIALS_FILE] destination
+
+positional arguments:
+  destination           The local folder to which the Google Drive backup will
+                        be made. Existing files will be overwritten.
+
+optional arguments:
+  -h, --help            show help message and exit
+  --redownload-docs     Re-download Google Documents even if timestamps show
+                        no changes have been made.
+  --redownload-files    Re-download binary files even if MD5 checksums match
+                        local files.
+  --trashed             This will download items located in the Trash, instead
+                        of the regular drive.
+  --credential-file CREDENTIALS_FILE
+                        Location of the credential file storing user
+                        credentials (default: user.json).
 ```
 
 ## License
