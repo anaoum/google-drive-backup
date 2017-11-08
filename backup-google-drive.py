@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import sys
 import httplib2
 import os, errno
 
@@ -52,9 +53,9 @@ def backup_folder(service, folder_id, destination, include_trashed=False):
     next_page_token = ''
     query = "trashed = {0} and '{1}' in parents".format(include_trashed, folder_id)
     while True:
-        result = service.files().list(fields="nextPageToken, files(id, name, mimeType)", q=query, pageSize=PAGE_SIZE, pageToken=next_page_token).execute()
+        result = service.files().list(fields="nextPageToken, files(id, name, mimeType, size, md5Checksum)", q=query, pageSize=PAGE_SIZE, pageToken=next_page_token).execute()
         for item in result['files']:
-            backup_file(service, item['id'], item['name'], item['mimeType'], destination, include_trashed)
+            backup_file(service, item, destination, include_trashed)
         if 'nextPageToken' in result:
             next_page_token = result['nextPageToken']
         else:
@@ -70,7 +71,10 @@ MIME_MAPPINGS = {
     'application/vnd.google-apps.script': ('application/vnd.google-apps.script+json', 'json'),
 }
 
-def backup_file(service, file_id, file_name, mime_type, destination, include_trashed):
+def backup_file(service, item, destination, include_trashed):
+    file_id = item['id']
+    file_name = item['name']
+    mime_type = item['mimeType']
     if mime_type == 'application/vnd.google-apps.folder':
         directory = os.path.join(destination, clean(file_name))
         try:
@@ -81,19 +85,33 @@ def backup_file(service, file_id, file_name, mime_type, destination, include_tra
         backup_folder(service, file_id, directory, include_trashed)
     elif mime_type in MIME_MAPPINGS:
         export_mime_type, extension = MIME_MAPPINGS[mime_type]
-        data = service.files().export(fileId=file_id, mimeType=export_mime_type).execute()
         output_file = os.path.join(destination, '{0}.{1}'.format(clean(file_name), extension))
+        print("Downloading", output_file)
+        data = service.files().export(fileId=file_id, mimeType=export_mime_type).execute()
+        with open(output_file, 'wb') as output:
+            output.write(data)
+    elif 'size' in item: # Binary file
+        output_file = os.path.join(destination, clean(file_name))
+        if os.path.exists(output_file):
+            if os.path.getsize(output_file) == int(item['size']):
+                local_checksum = md5(output_file)
+                if local_checksum == item['md5Checksum']:
+                    print("Unchanged", output_file)
+                    return
+        print("Downloading", output_file)
+        data = service.files().get_media(fileId=file_id).execute()
         with open(output_file, 'wb') as output:
             output.write(data)
     else:
-        data = service.files().get(fileId=file_id, fields='size').execute()
-        if 'size' in data:
-            data = service.files().get_media(fileId=file_id).execute()
-            output_file = os.path.join(destination, clean(file_name))
-            with open(output_file, 'wb') as output:
-                output.write(data)
-        else:
-            print("Cannot handle", mime_type, file_id, file_name)
+        print("WARNING: Cannot handle", mime_type, file_id, file_name, file=sys.stderr)
+
+import hashlib
+def md5(fname):
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
 
 def clean(filename):
     filename = filename.replace('/', '-')
