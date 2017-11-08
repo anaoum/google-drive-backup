@@ -62,25 +62,35 @@ def main():
             else:
                 break
 
-    def rename(item):
-        i = item["name"].rfind(".")
-        if i == -1:
-            return item["name"] + "-" + item["id"]
-        return item["name"][:i] + "-" + item["id"] + item["name"][i:]
-
     backed_up_files = set()
-    def backup_file(item, destination):
-        key = (destination, item["name"])
+    def rename(filename, file_id):
+        i = filename.rfind(".")
+        if i == -1:
+            return filename + "-" + file_id
+        return filename[:i] + "-" + file_id + filename[i:]
+    def clean(filename):
+        filename = filename.replace("/", "-")
+        filename = filename.replace("\\", "-")
+        filename = filename.replace(": ", " ")
+        filename = filename.replace(":", " ")
+        return filename
+    def check_name(destination, filename, file_id):
+        key = (destination, filename)
         if key in backed_up_files:
-            print("WARNING:", item["name"], "already exists in", destination + ".", "Renaming to", rename(item) + ".", file=sys.stderr)
-            item["name"] = rename(item)
-            key = (destination, item["name"])
+            new_filename = rename(filename, file_id)
+            print("WARNING:", filename, "already exists in", destination + ".", "Renaming to", new_filename + ".", file=sys.stderr)
+            key = (destination, new_filename)
+            filename = new_filename
         backed_up_files.add(key)
+        return clean(filename)
+
+    def backup_file(item, destination):
         if item["mimeType"] == "application/vnd.google-apps.folder":
-            backup_folder(item["id"], os.path.join(destination, clean(item["name"])))
+            folder_name = os.path.join(destination, check_name(destination, item["name"], item["id"]))
+            backup_folder(item["id"], folder_name)
         elif item["mimeType"] in MIME_MAPPINGS:
             export_mime_type, extension = MIME_MAPPINGS[item["mimeType"]]
-            output_file = os.path.join(destination, "{0}.{1}".format(clean(item["name"]), extension))
+            output_file = os.path.join(destination, check_name(destination, "{0}.{1}".format(item["name"], extension), item["id"]))
             modified_time = parse_time(item["modifiedTime"])
             if os.path.exists(output_file) and modified_time.timestamp() == os.stat(output_file).st_mtime:
                 print("Unchanged", output_file)
@@ -92,7 +102,7 @@ def main():
                 viewed_time = parse_time(item["viewedByMeTime"]) if "viewedByMeTime" in item else modified_time
                 os.utime(output_file, times=(viewed_time.timestamp(), modified_time.timestamp()))
         elif "size" in item: # Binary file
-            output_file = os.path.join(destination, clean(item["name"]))
+            output_file = os.path.join(destination, check_name(destination, item["name"], item["id"]))
             if "md5Checksum" in item and \
                     os.path.exists(output_file) and \
                     os.path.getsize(output_file) == int(item["size"]) and \
@@ -125,13 +135,6 @@ def md5(fname):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
-
-def clean(filename):
-    filename = filename.replace("/", "-")
-    filename = filename.replace("\\", "-")
-    filename = filename.replace(": ", " ")
-    filename = filename.replace(":", " ")
-    return filename
 
 def parse_time(time):
     return datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc).replace(microsecond=0)
